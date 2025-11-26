@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>快递查询中心</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            background:#f2f2f2;
+            font-family: Arial, sans-serif;
+            padding: 15px;
+        }
+        h2 { text-align:center; }
+
+        .input-box {
+            background:white;
+            padding:15px;
+            border-radius:12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+            margin-bottom:20px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border:1px solid #ddd;
+            border-radius:8px;
+            font-size:16px;
+            margin-bottom:10px;
+        }
+        button {
+            width:100%;
+            padding:12px;
+            background:#4CAF50;
+            color:white;
+            border:none;
+            border-radius:8px;
+            font-size:16px;
+        }
+        .card {
+            background:white;
+            padding:15px;
+            margin-bottom:15px;
+            border-radius:12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+        }
+        .tag {
+            font-size:14px;
+            color:#888;
+            margin-bottom:8px;
+        }
+        .bold { font-weight:bold; }
+
+        .dialog {
+            position: fixed;
+            left:0;
+            top:0;
+            width:100%;
+            height:100%;
+            background: rgba(0,0,0,.5);
+            display:none;
+            justify-content:center;
+            align-items:center;
+        }
+        .dialog-content {
+            width:90%;
+            max-height:80%;
+            background:white;
+            padding:20px;
+            border-radius:12px;
+            overflow-y:auto;
+        }
+        .log-item{
+            border-left:3px solid #4CAF50;
+            padding:8px;
+            margin-bottom:10px;
+            background:#f8f8f8;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>📦 我的快递</h2>
+
+<div class="input-box">
+    <input type="text" id="companyInput" placeholder="快递公司代码（如：yt, zt, sf）">
+    <input type="text" id="numInput" placeholder="请输入快递单号">
+    <input type="text" id="phoneInput" placeholder="寄件人手机号（可选）">
+    <button onclick="addTracking()">添加快递</button>
+</div>
+
+<div id="cardList"></div>
+
+<!-- 物流弹窗 -->
+<div class="dialog" id="dialog">
+    <div class="dialog-content" id="dialogContent"></div>
+</div>
+
+<script>
+/* -------------------------------------
+   你需要填写自己的快递100 API 参数
+--------------------------------------- */
+const KUAIDI100_KEY = "XvxnMatH9371";
+const KUAIDI100_CUSTOMER = "063458B4730A246820B0AB5BF9FAC182";
+
+/* ----------------------------
+   快递100 主查询（对齐 Java 示例）
+----------------------------- */
+async function kuaiDi100Query({ com, num, phone }) {
+    const paramObj = { com, num };
+    if (phone) paramObj.phone = phone;
+    const param = JSON.stringify(paramObj);
+
+    const sign = md5(param + KUAIDI100_KEY + KUAIDI100_CUSTOMER).toUpperCase();
+
+    const form = new FormData();
+    form.append("customer", KUAIDI100_CUSTOMER);
+    form.append("sign", sign);
+    form.append("param", param);
+
+    const res = await fetch("https://poll.kuaidi100.com/poll/query.do", {
+        method: "POST",
+        body: form
+    });
+    return res.json();
+}
+
+/* ----------------------------
+        LocalStorage 操作
+----------------------------- */
+function save(list){
+    localStorage.setItem("trackList", JSON.stringify(list));
+}
+function load(){
+    return JSON.parse(localStorage.getItem("trackList") || "[]");
+}
+
+/* ----------------------------
+        添加快递
+----------------------------- */
+async function addTracking(){
+    const com = document.getElementById("companyInput").value.trim();
+    const num = document.getElementById("numInput").value.trim();
+    const phone = document.getElementById("phoneInput").value.trim();
+
+    if (!com || !num) return alert("请填写 公司代码 和 单号");
+
+    const info = await kuaiDi100Query({ com, num, phone });
+
+    if(!info || !info.data){
+        console.log(info);
+        return alert("查询失败，请检查公司代码是否正确");
+    }
+
+    const list = load();
+    list.unshift({
+        com,
+        num,
+        phone,
+        sender: info.sender || {},
+        receiver: info.receiver || {},
+        data: info.data
+    });
+
+    save(list);
+    render();
+
+    document.getElementById("companyInput").value = "";
+    document.getElementById("numInput").value = "";
+    document.getElementById("phoneInput").value = "";
+}
+
+/* ----------------------------
+        渲染卡片 (最多3个)
+----------------------------- */
+function render(){
+    const list = load();
+    const box = document.getElementById("cardList");
+    box.innerHTML = "";
+
+    list.slice(0,3).forEach((it, i) => {
+        const last = it.data[0] || {};
+        box.innerHTML += `
+            <div class="card" onclick="showDetail(${i})">
+                <div class="tag">${it.com}｜${it.num}</div>
+
+                <div class="bold">
+                    寄件人：${it.sender.name || "--"} (${it.sender.addr || "--"})
+                </div>
+
+                <div class="bold">
+                    收件人：${it.receiver.name || "--"} (${it.receiver.addr || "--"})
+                </div>
+
+                <div style="margin-top:10px;color:#333;">
+                    当前：${last.context || "暂无物流信息"}
+                </div>
+            </div>
+        `;
+    });
+}
+
+/* ----------------------------
+        点击卡片弹出详情
+----------------------------- */
+function showDetail(index){
+    const item = load()[index];
+    const box = document.getElementById("dialogContent");
+
+    box.innerHTML = `<h3>${item.com} - ${item.num}</h3>`;
+
+    item.data.forEach(log=>{
+        box.innerHTML += `
+            <div class="log-item">
+                <div>${log.time}</div>
+                <div>${log.context}</div>
+            </div>
+        `;
+    });
+
+    document.getElementById("dialog").style.display="flex";
+}
+
+document.getElementById("dialog").onclick = () => {
+    document.getElementById("dialog").style.display="none";
+};
+
+/* ----------------------------
+ MD5 实现（可直接使用）
+----------------------------- */
+!function(){function e(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|65535&n}function t(t,n,r,o,a,i){return e((c=e(e(n,t),e(o,i)))<<(a=a)||c>>>32-a,r);var c}function n(e,n,r,o,a,i,c){return t(n&r|~n&o,e,n,a,i,c)}function r(e,n,r,o,a,i,c){return t(n&o|r&~o,e,n,a,i,c)}function o(e,n,r,o,a,i,c){return t(n^r^o,e,n,a,i,c)}function a(e,n,r,o,a,i,c){return t(r^(n|~o),e,n,a,i,c)}function i(t,i,c,s,u,l){return t=e(e(t,e(e(n(i,c,s,u,l),o(i,c,s,u,l),a(i,c,s,u,l)))),s)}window.md5=function(n){var r,o,c,s=[],u=1732584193,l=-271733879,f=-1732584194,d=271733878;n=function(e){for(var t="",n="",r=0;r<e.length;r++)t+=(n=e.charCodeAt(r).toString(16)).length<2?"0"+n:n;return t}(unescape(encodeURIComponent(n)));for(var p=0;p<n.length;p+=2)s.push(parseInt(n.substr(p,2),16));s.push(128);for(;s.length%64!=56;)s.push(0);for(var p=0;p<8;p++)s.push(0);for(p=0;p<s.length;p+=64){var h=s.slice(p,p+64);r=u,o=l,c=f;for(var m=0;m<64;m++){var v=h[m];u=i(u,l,f,d,132,v)}u=e(u,r),l=e(l,o),f=e(f,c),d=e(d,s)}return[u,l,f,d].map((function(e){return(e>>>0).toString(16).padStart(8,"0")})).join("")};
+}();
+
+render();
+</script>
+
+</body>
+</html>
